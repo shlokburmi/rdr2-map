@@ -137,3 +137,6 @@ Performance optimizations for large routes
 Shlok Burmi
 
 🔗 GitHub: https://github.com/shlokburmi
+
+## ⭐ If you like the project, consider starring the repo!
+
