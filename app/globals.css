@@ -21,9 +21,7 @@ body {
 
 /* soften map tiles */
 .leaflet-tile {
-  filter: grayscale(75%)
-          contrast(110%)
-          brightness(104%);
+  filter: grayscale(75%) contrast(110%) brightness(104%);
 }
 
 /* cinematic vignette */
@@ -41,11 +39,9 @@ body {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(
-      circle at center,
+    radial-gradient(circle at center,
       rgba(0, 0, 0, 0) 55%,
-      rgba(0, 0, 0, 0.28) 100%
-    ),
+      rgba(0, 0, 0, 0.28) 100%),
     url("/parchment.png");
   background-size: cover;
   mix-blend-mode: multiply;
@@ -108,6 +104,7 @@ body {
     opacity: 0;
     transform: translateY(-6px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -125,14 +122,26 @@ body {
 .leaflet-popup-tip {
   background: rgba(40, 25, 15, 0.9);
 }
+
 .rdr-waypoint {
   animation: pulse 1.5s infinite;
 }
 
 @keyframes pulse {
-  0% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.15); opacity: 0.7; }
-  100% { transform: scale(1); opacity: 1; }
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.15);
+    opacity: 0.7;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .rdr-distance {
@@ -177,9 +186,20 @@ body {
 }
 
 @keyframes rdrPulse {
-  0% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.15); opacity: 0.75; }
-  100% { transform: scale(1); opacity: 1; }
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(1.15);
+    opacity: 0.75;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .rdr-day .leaflet-tile {
@@ -198,12 +218,13 @@ body {
 .rdr-night {
   transition: filter 1.5s ease;
 }
+
 .rdr-town-label span {
   font-family: "Cinzel", serif;
   font-size: 18px;
   letter-spacing: 0.15em;
   color: #2b1d12;
-  text-shadow: 1px 1px 2px rgba(0,0,0,0.4);
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.4);
   opacity: 0.85;
 }
 
