@@ -11,7 +11,6 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
-import "leaflet/dist/leaflet.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 /* ---------- Leaflet icon fix ---------- */

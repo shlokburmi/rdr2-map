@@ -1,5 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&display=swap");
 @import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
 /* ================= BASE ================= */
 
 :root {
