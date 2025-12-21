@@ -4,9 +4,9 @@ import {
   MapContainer,
   TileLayer,
   Marker,
-  Popup,
   Polyline,
   Circle,
+  Popup,
   useMap,
   useMapEvents,
 } from "react-leaflet";
@@ -14,7 +14,32 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-/* ---------------- Leaflet default icon fix ---------------- */
+function MiniMap({ center }: { center: [number, number] | null }) {
+  if (!center) return null;
+
+  return (
+    <div className="rdr-minimap">
+      <MapContainer
+        center={center}
+        zoom={15}
+        dragging={false}
+        zoomControl={false}
+        scrollWheelZoom={false}
+        doubleClickZoom={false}
+        attributionControl={false}
+        keyboard={false}
+        style={{ height: "100%", width: "100%" }}
+      >
+        <TileLayer
+          url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
+        />
+        <Marker position={center} />
+      </MapContainer>
+    </div>
+  );
+}
+
+/* ---------------- Leaflet icon fix ---------------- */
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
@@ -54,22 +79,18 @@ const poiIcons: Record<POIType, L.Icon> = {
   town: new L.Icon({ iconUrl: "/icons/town.png", iconSize: [32, 32] }),
 };
 
-/* ---------------- Camera Fly (NO rotation) ---------------- */
+/* ---------------- Camera ---------------- */
 function FlyTo({ target }: { target: LatLng | null }) {
   const map = useMap();
-
   useEffect(() => {
-    if (!target) return;
-    map.flyTo(target, 14, {
-      duration: 2,
-      easeLinearity: 0.25,
-    });
+    if (target) {
+      map.flyTo(target, 14, { duration: 2, easeLinearity: 0.25 });
+    }
   }, [target, map]);
-
   return null;
 }
 
-/* ---------------- Map Click (Waypoint Set) ---------------- */
+/* ---------------- Click ---------------- */
 function WaypointClick({ onSet }: { onSet: (p: LatLng) => void }) {
   useMapEvents({
     click(e) {
@@ -83,7 +104,6 @@ function WaypointClick({ onSet }: { onSet: (p: LatLng) => void }) {
 export default function RDR2Map() {
   const [playerPos, setPlayerPos] = useState<LatLng | null>(null);
   const [waypoint, setWaypoint] = useState<LatLng | null>(null);
-
   const [route, setRoute] = useState<LatLng[]>([]);
   const [animatedRoute, setAnimatedRoute] = useState<LatLng[]>([]);
   const [distance, setDistance] = useState<number | null>(null);
@@ -91,7 +111,7 @@ export default function RDR2Map() {
   const animRef = useRef<number | null>(null);
   const explored = useRef<LatLng[]>([]);
 
-  /* -------- Live GPS (north-up, no heading) -------- */
+  /* -------- GPS -------- */
   useEffect(() => {
     if (!navigator.geolocation) return;
 
@@ -101,14 +121,14 @@ export default function RDR2Map() {
         setPlayerPos(p);
         explored.current.push(p);
       },
-      () => { },
+      () => {},
       { enableHighAccuracy: true }
     );
 
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
-  /* -------- OSRM real road routing -------- */
+  /* -------- OSRM ROUTE -------- */
   useEffect(() => {
     if (!playerPos || !waypoint) return;
 
@@ -117,40 +137,54 @@ export default function RDR2Map() {
     )
       .then((r) => r.json())
       .then((d) => {
-        const coords: LatLng[] =
-          d.routes[0].geometry.coordinates.map(
-            ([lng, lat]: number[]) => [lat, lng]
+        if (!d?.routes?.[0]?.geometry?.coordinates) return;
+
+        const coords: LatLng[] = d.routes[0].geometry.coordinates
+          .map(([lng, lat]: number[]) => [lat, lng] as LatLng)
+          .filter(
+            (p) =>
+              Array.isArray(p) &&
+              typeof p[0] === "number" &&
+              typeof p[1] === "number"
           );
 
+        if (coords.length < 2) return;
+
         setRoute(coords);
-        setAnimatedRoute([]); // reset animation
+        setAnimatedRoute([coords[0]]);
         setDistance(d.routes[0].distance / 1000);
       });
   }, [playerPos, waypoint]);
 
-  /* -------- Animated route draw (RDR2 style) -------- */
+  /* -------- SAFE ROUTE ANIMATION -------- */
   useEffect(() => {
-    if (route.length === 0) return;
+    if (route.length < 2) return;
+
+    let index = 1;
 
     if (animRef.current) {
       cancelAnimationFrame(animRef.current);
+      animRef.current = null;
     }
 
-    let i = 0;
-
     const animate = () => {
-      setAnimatedRoute((prev) => {
-        if (i >= route.length) return prev;
-        return [...prev, route[i++]];
-      });
+      if (index >= route.length) return;
+
+      const point = route[index];
+      if (!point) return;
+
+      setAnimatedRoute((prev) => [...prev, point]);
+      index++;
+
       animRef.current = requestAnimationFrame(animate);
     };
 
-    animate();
+    animRef.current = requestAnimationFrame(animate);
 
     return () => {
       if (animRef.current) {
         cancelAnimationFrame(animRef.current);
+        animRef.current = null;
       }
     };
   }, [route]);
@@ -159,20 +193,27 @@ export default function RDR2Map() {
   const pois: POI[] = useMemo(() => {
     const center: LatLng = [23.458, 75.417];
     const types: POIType[] = ["shop", "camp", "doctor", "stable"];
-
     const list: POI[] = [{ type: "town", position: center }];
 
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 35; i++) {
       list.push({
         type: types[Math.floor(Math.random() * types.length)],
         position: [
-          center[0] + (Math.random() - 0.5) * 0.1,
-          center[1] + (Math.random() - 0.5) * 0.1,
+          center[0] + (Math.random() - 0.5) * 0.12,
+          center[1] + (Math.random() - 0.5) * 0.12,
         ],
       });
     }
     return list;
   }, []);
+
+  /* -------- FINAL SAFETY FILTER -------- */
+  const safeAnimatedRoute = animatedRoute.filter(
+    (p): p is LatLng =>
+      Array.isArray(p) &&
+      typeof p[0] === "number" &&
+      typeof p[1] === "number"
+  );
 
   return (
     <>
@@ -185,6 +226,9 @@ export default function RDR2Map() {
       <MapContainer
         center={[23.458, 75.417]}
         zoom={12}
+        zoomControl={false}
+        attributionControl={false}
+        preferCanvas
         style={{ height: "100vh", width: "100vw" }}
       >
         <TileLayer url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png" />
@@ -207,21 +251,17 @@ export default function RDR2Map() {
             key={i}
             position={p.position}
             icon={poiIcons[p.type]}
-            eventHandlers={{
-              click: () => setWaypoint(p.position),
-            }}
+            eventHandlers={{ click: () => setWaypoint(p.position) }}
           >
             <Popup>{p.type.toUpperCase()}</Popup>
           </Marker>
         ))}
 
-        {waypoint && (
-          <Marker position={waypoint} icon={waypointIcon} />
-        )}
+        {waypoint && <Marker position={waypoint} icon={waypointIcon} />}
 
-        {animatedRoute.length > 1 && (
+        {safeAnimatedRoute.length > 1 && (
           <Polyline
-            positions={animatedRoute}
+            positions={safeAnimatedRoute}
             pathOptions={{
               color: "#8b0000",
               weight: 3,
@@ -230,16 +270,12 @@ export default function RDR2Map() {
           />
         )}
 
-        {/* Fog of war */}
         {explored.current.map((p, i) => (
           <Circle
             key={i}
             center={p}
             radius={450}
-            pathOptions={{
-              fillColor: "transparent",
-              color: "transparent",
-            }}
+            pathOptions={{ color: "transparent", fillOpacity: 0 }}
           />
         ))}
 

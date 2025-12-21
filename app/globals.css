@@ -1,5 +1,5 @@
-@import "tailwindcss";
 @import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&display=swap");
+@import "tailwindcss";
 /* ================= BASE ================= */
 
 :root {
@@ -178,4 +178,41 @@ body {
   0% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.15); opacity: 0.75; }
   100% { transform: scale(1); opacity: 1; }
+}
+
+.rdr-day .leaflet-tile {
+  filter: grayscale(75%) contrast(110%) brightness(104%);
+}
+
+.rdr-night .leaflet-tile {
+  filter: grayscale(90%) contrast(120%) brightness(80%) hue-rotate(180deg);
+}
+
+.rdr-night .rdr-parchment {
+  opacity: 0.5;
+}
+
+.rdr-day,
+.rdr-night {
+  transition: filter 1.5s ease;
+}
+.rdr-town-label span {
+  font-family: "Cinzel", serif;
+  font-size: 18px;
+  letter-spacing: 0.15em;
+  color: #2b1d12;
+  text-shadow: 1px 1px 2px rgba(0,0,0,0.4);
+  opacity: 0.85;
+}
+
+
+/* FORCE REMOVE ANY COMPASS / OVERLAY ICON */
+.leaflet-control,
+.leaflet-control-container,
+.leaflet-control-attribution,
+.leaflet-control-scale,
+.leaflet-control-compass,
+img[alt*="compass"],
+img[src*="compass"] {
+  display: none !important;
 }
