@@ -1,26 +1,181 @@
 @import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&display=swap");
+/* ================= BASE ================= */
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #e6dcc7;
+  --foreground: #2b1d12;
 }
 
 body {
+  margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Cinzel", serif;
+  overflow: hidden;
+}
+
+/* ================= MAP LOOK (RDR2 STYLE) ================= */
+
+/* soften map tiles */
+.leaflet-tile {
+  filter: grayscale(75%)
+          contrast(110%)
+          brightness(104%);
+}
+
+/* cinematic vignette */
+.leaflet-container::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 140px rgba(40, 25, 15, 0.55);
+  z-index: 600;
+}
+
+/* parchment overlay */
+.rdr-parchment {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(0, 0, 0, 0) 55%,
+      rgba(0, 0, 0, 0.28) 100%
+    ),
+    url("/parchment.png");
+  background-size: cover;
+  mix-blend-mode: multiply;
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: 500;
+}
+
+/* ================= UI (RDR2 PANELS) ================= */
+
+.rdr-panel {
+  position: absolute;
+  z-index: 1000;
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(40, 25, 15, 0.85);
+  border: 2px solid #c9a44c;
+  backdrop-filter: blur(2px);
+}
+
+.rdr-btn {
+  background: #3b2b1f;
+  border: 2px solid #c9a44c;
+  color: #e8d8b0;
+  font-family: "Cinzel", serif;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+
+.rdr-btn[data-active="true"] {
+  background: #6b1e10;
+}
+
+/* ================= HUD ================= */
+
+.rdr-distance {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(40, 25, 15, 0.85);
+  border: 2px solid #c9a44c;
+  color: #e8d8b0;
+  padding: 6px 14px;
+  font-size: 14px;
+  z-index: 1000;
+}
+
+/* ================= MARKERS ================= */
+
+.leaflet-marker-icon {
+  animation: fadeIn 0.35s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* remove default leaflet popup look */
+.leaflet-popup-content-wrapper {
+  background: rgba(40, 25, 15, 0.9);
+  color: #e8d8b0;
+  border: 2px solid #c9a44c;
+  font-family: "Cinzel", serif;
+}
+
+.leaflet-popup-tip {
+  background: rgba(40, 25, 15, 0.9);
+}
+.rdr-waypoint {
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.7; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.rdr-distance {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #3b2b1f;
+  color: #e8d8b0;
+  border: 2px solid #c9a44c;
+  padding: 6px 14px;
+  font-family: "Cinzel", serif;
+  z-index: 999;
+}
+
+/* ---------- RDR2 Typography ---------- */
+
+
+.rdr-ui {
+  font-family: "Cinzel", serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* distance plaque */
+.rdr-distance {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(40, 25, 15, 0.9);
+  border: 2px solid #c9a44c;
+  padding: 6px 14px;
+  color: #e8d8b0;
+  font-size: 13px;
+  z-index: 1200;
+}
+
+/* waypoint pulse */
+.rdr-waypoint {
+  animation: rdrPulse 1.8s infinite;
+}
+
+@keyframes rdrPulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.75; }
+  100% { transform: scale(1); opacity: 1; }
 }
