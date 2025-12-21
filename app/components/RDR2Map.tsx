@@ -14,52 +14,25 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-function MiniMap({ center }: { center: [number, number] | null }) {
-  if (!center) return null;
-
-  return (
-    <div className="rdr-minimap">
-      <MapContainer
-        center={center}
-        zoom={15}
-        dragging={false}
-        zoomControl={false}
-        scrollWheelZoom={false}
-        doubleClickZoom={false}
-        attributionControl={false}
-        keyboard={false}
-        style={{ height: "100%", width: "100%" }}
-      >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
-        />
-        <Marker position={center} />
-      </MapContainer>
-    </div>
-  );
-}
-
-/* ---------------- Leaflet icon fix ---------------- */
+/* ---------- Leaflet icon fix ---------- */
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
 
-/* ---------------- Types ---------------- */
+/* ---------- Types ---------- */
 type LatLng = [number, number];
 type POIType = "shop" | "camp" | "doctor" | "stable" | "town";
 
 interface POI {
   type: POIType;
   position: LatLng;
+  name?: string;
 }
 
-/* ---------------- Icons ---------------- */
+/* ---------- Icons ---------- */
 const playerIcon = new L.Icon({
   iconUrl: "/icons/player.png",
   iconSize: [36, 36],
@@ -72,25 +45,26 @@ const waypointIcon = new L.Icon({
 });
 
 const poiIcons: Record<POIType, L.Icon> = {
-  shop: new L.Icon({ iconUrl: "/icons/shop.png", iconSize: [28, 28] }),
-  camp: new L.Icon({ iconUrl: "/icons/camp.png", iconSize: [28, 28] }),
-  doctor: new L.Icon({ iconUrl: "/icons/doctor.png", iconSize: [28, 28] }),
-  stable: new L.Icon({ iconUrl: "/icons/stable.png", iconSize: [28, 28] }),
-  town: new L.Icon({ iconUrl: "/icons/town.png", iconSize: [32, 32] }),
+  shop: new L.Icon({ iconUrl: "/icons/shop.png", iconSize: [26, 26] }),
+  camp: new L.Icon({ iconUrl: "/icons/camp.png", iconSize: [26, 26] }),
+  doctor: new L.Icon({ iconUrl: "/icons/doctor.png", iconSize: [26, 26] }),
+  stable: new L.Icon({ iconUrl: "/icons/stable.png", iconSize: [26, 26] }),
+  town: new L.Icon({ iconUrl: "/icons/town.png", iconSize: [34, 34] }),
 };
 
-/* ---------------- Camera ---------------- */
-function FlyTo({ target }: { target: LatLng | null }) {
+/* ---------- Camera control ---------- */
+function CameraFocus({ target }: { target: LatLng | null }) {
   const map = useMap();
+
   useEffect(() => {
-    if (target) {
-      map.flyTo(target, 14, { duration: 2, easeLinearity: 0.25 });
-    }
+    if (!target) return;
+    map.flyTo(target, 14, { duration: 1.8, easeLinearity: 0.25 });
   }, [target, map]);
+
   return null;
 }
 
-/* ---------------- Click ---------------- */
+/* ---------- Map click ---------- */
 function WaypointClick({ onSet }: { onSet: (p: LatLng) => void }) {
   useMapEvents({
     click(e) {
@@ -105,13 +79,13 @@ export default function RDR2Map() {
   const [playerPos, setPlayerPos] = useState<LatLng | null>(null);
   const [waypoint, setWaypoint] = useState<LatLng | null>(null);
   const [route, setRoute] = useState<LatLng[]>([]);
-  const [animatedRoute, setAnimatedRoute] = useState<LatLng[]>([]);
+  const [drawnRoute, setDrawnRoute] = useState<LatLng[]>([]);
   const [distance, setDistance] = useState<number | null>(null);
 
   const animRef = useRef<number | null>(null);
   const explored = useRef<LatLng[]>([]);
 
-  /* -------- GPS -------- */
+  /* ---------- GPS ---------- */
   useEffect(() => {
     if (!navigator.geolocation) return;
 
@@ -121,14 +95,14 @@ export default function RDR2Map() {
         setPlayerPos(p);
         explored.current.push(p);
       },
-      () => {},
+      () => { },
       { enableHighAccuracy: true }
     );
 
     return () => navigator.geolocation.clearWatch(id);
   }, []);
 
-  /* -------- OSRM ROUTE -------- */
+  /* ---------- Routing ---------- */
   useEffect(() => {
     if (!playerPos || !waypoint) return;
 
@@ -137,83 +111,64 @@ export default function RDR2Map() {
     )
       .then((r) => r.json())
       .then((d) => {
-        if (!d?.routes?.[0]?.geometry?.coordinates) return;
+        if (!d?.routes?.[0]) return;
 
-        const coords: LatLng[] = d.routes[0].geometry.coordinates
-          .map(([lng, lat]: number[]) => [lat, lng] as LatLng)
-          .filter(
-            (p) =>
-              Array.isArray(p) &&
-              typeof p[0] === "number" &&
-              typeof p[1] === "number"
-          );
-
-        if (coords.length < 2) return;
+        const coords: LatLng[] = d.routes[0].geometry.coordinates.map(
+          ([lng, lat]: number[]) => [lat, lng]
+        );
 
         setRoute(coords);
-        setAnimatedRoute([coords[0]]);
+        setDrawnRoute([]);
         setDistance(d.routes[0].distance / 1000);
       });
   }, [playerPos, waypoint]);
 
-  /* -------- SAFE ROUTE ANIMATION -------- */
+  /* ---------- Route animation (paced) ---------- */
   useEffect(() => {
     if (route.length < 2) return;
 
-    let index = 1;
+    let i = 0;
+    setDrawnRoute([route[0]]);
 
-    if (animRef.current) {
-      cancelAnimationFrame(animRef.current);
-      animRef.current = null;
-    }
+    if (animRef.current) cancelAnimationFrame(animRef.current);
 
     const animate = () => {
-      if (index >= route.length) return;
+      i += 2; // pacing (slower & cinematic)
+      if (i >= route.length) return;
 
-      const point = route[index];
-      if (!point) return;
-
-      setAnimatedRoute((prev) => [...prev, point]);
-      index++;
-
+      setDrawnRoute((prev) => [...prev, route[i]]);
       animRef.current = requestAnimationFrame(animate);
     };
 
     animRef.current = requestAnimationFrame(animate);
 
     return () => {
-      if (animRef.current) {
-        cancelAnimationFrame(animRef.current);
-        animRef.current = null;
-      }
+      if (animRef.current) cancelAnimationFrame(animRef.current);
     };
   }, [route]);
 
-  /* -------- POIs -------- */
+  /* ---------- POIs ---------- */
   const pois: POI[] = useMemo(() => {
     const center: LatLng = [23.458, 75.417];
-    const types: POIType[] = ["shop", "camp", "doctor", "stable"];
-    const list: POI[] = [{ type: "town", position: center }];
 
-    for (let i = 0; i < 35; i++) {
+    const list: POI[] = [
+      { type: "town", position: center, name: "Nagda" },
+    ];
+
+    const types: POIType[] = ["shop", "camp", "doctor", "stable"];
+
+    for (let i = 0; i < 30; i++) {
       list.push({
         type: types[Math.floor(Math.random() * types.length)],
         position: [
           center[0] + (Math.random() - 0.5) * 0.12,
           center[1] + (Math.random() - 0.5) * 0.12,
-        ],
+        ] as LatLng,
       });
     }
+
     return list;
   }, []);
-
-  /* -------- FINAL SAFETY FILTER -------- */
-  const safeAnimatedRoute = animatedRoute.filter(
-    (p): p is LatLng =>
-      Array.isArray(p) &&
-      typeof p[0] === "number" &&
-      typeof p[1] === "number"
-  );
 
   return (
     <>
@@ -234,7 +189,7 @@ export default function RDR2Map() {
         <TileLayer url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png" />
         <TileLayer
           url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png"
-          opacity={0.6}
+          opacity={0.55}
         />
 
         <WaypointClick onSet={setWaypoint} />
@@ -242,7 +197,7 @@ export default function RDR2Map() {
         {playerPos && (
           <>
             <Marker position={playerPos} icon={playerIcon} />
-            <FlyTo target={playerPos} />
+            <CameraFocus target={playerPos} />
           </>
         )}
 
@@ -253,15 +208,21 @@ export default function RDR2Map() {
             icon={poiIcons[p.type]}
             eventHandlers={{ click: () => setWaypoint(p.position) }}
           >
-            <Popup>{p.type.toUpperCase()}</Popup>
+            {p.name && (
+              <Popup>
+                <div className="rdr-town-label">
+                  <span>{p.name}</span>
+                </div>
+              </Popup>
+            )}
           </Marker>
         ))}
 
         {waypoint && <Marker position={waypoint} icon={waypointIcon} />}
 
-        {safeAnimatedRoute.length > 1 && (
+        {drawnRoute.length > 1 && (
           <Polyline
-            positions={safeAnimatedRoute}
+            positions={drawnRoute}
             pathOptions={{
               color: "#8b0000",
               weight: 3,
@@ -274,8 +235,11 @@ export default function RDR2Map() {
           <Circle
             key={i}
             center={p}
-            radius={450}
-            pathOptions={{ color: "transparent", fillOpacity: 0 }}
+            radius={500}
+            pathOptions={{
+              color: "transparent",
+              fillOpacity: 0,
+            }}
           />
         ))}
 
