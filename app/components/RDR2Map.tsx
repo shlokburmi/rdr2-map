@@ -147,27 +147,39 @@ export default function RDR2Map() {
   }, [route]);
 
   /* ---------- POIs ---------- */
-  const pois: POI[] = useMemo(() => {
-    const center: LatLng = [23.458, 75.417];
+/* ---------- POIs (spawn near user) ---------- */
+const pois: POI[] = useMemo(() => {
+  // 🚨 Do NOT generate POIs until location exists
+  if (!playerPos) return [];
 
-    const list: POI[] = [
-      { type: "town", position: center, name: "Nagda" },
-    ];
+  const center: LatLng = playerPos;
 
-    const types: POIType[] = ["shop", "camp", "doctor", "stable"];
+  const list: POI[] = [
+    {
+      type: "town",
+      position: center,
+      name: "Nearby Town",
+    },
+  ];
 
-    for (let i = 0; i < 30; i++) {
-      list.push({
-        type: types[Math.floor(Math.random() * types.length)],
-        position: [
-          center[0] + (Math.random() - 0.5) * 0.12,
-          center[1] + (Math.random() - 0.5) * 0.12,
-        ] as LatLng,
-      });
-    }
+  const types: POIType[] = ["shop", "camp", "doctor", "stable"];
 
-    return list;
-  }, []);
+  for (let i = 0; i < 30; i++) {
+    const offsetLat = (Math.random() - 0.5) * 0.12;
+    const offsetLng = (Math.random() - 0.5) * 0.12;
+
+    list.push({
+      type: types[Math.floor(Math.random() * types.length)],
+      position: [
+        center[0] + offsetLat,
+        center[1] + offsetLng,
+      ],
+    });
+  }
+
+  return list;
+}, [playerPos]);
+
 
   return (
     <>
