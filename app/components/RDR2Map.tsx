@@ -1,261 +1,466 @@
 "use client";
 
+import { useEffect, useState, useRef, useMemo } from "react";
 import {
   MapContainer,
   TileLayer,
   Marker,
   Polyline,
-  Circle,
   Popup,
   useMap,
   useMapEvents,
 } from "react-leaflet";
 import L from "leaflet";
-import { useEffect, useMemo, useRef, useState } from "react";
+import "leaflet/dist/leaflet.css";
 
-/* ---------- Leaflet icon fix ---------- */
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-});
-
-/* ---------- Types ---------- */
 type LatLng = [number, number];
-type POIType = "shop" | "camp" | "doctor" | "stable" | "town";
+
+type POIType =
+  | "hospital"
+  | "gas-station"
+  | "sheriff"
+  | "bank"
+  | "restaurant"
+  | "shop"
+  | "camp"
+  | "hotel"
+  | "saloon";
 
 interface POI {
+  id: number;
   type: POIType;
   position: LatLng;
   name?: string;
 }
 
-/* ---------- Icons ---------- */
-const playerIcon = new L.Icon({
-  iconUrl: "/icons/player.png",
-  iconSize: [36, 36],
-});
+/* ---------- Helpers ---------- */
 
-const waypointIcon = new L.Icon({
-  iconUrl: "/icons/waypoint.png",
-  iconSize: [28, 28],
-  className: "rdr-waypoint",
-});
+const isLatLng = (p: unknown): p is LatLng =>
+  Array.isArray(p) &&
+  p.length === 2 &&
+  typeof p[0] === "number" &&
+  typeof p[1] === "number" &&
+  !isNaN(p[0]) &&
+  !isNaN(p[1]);
 
-const poiIcons: Record<POIType, L.Icon> = {
-  shop: new L.Icon({ iconUrl: "/icons/shop.png", iconSize: [26, 26] }),
-  camp: new L.Icon({ iconUrl: "/icons/camp.png", iconSize: [26, 26] }),
-  doctor: new L.Icon({ iconUrl: "/icons/doctor.png", iconSize: [26, 26] }),
-  stable: new L.Icon({ iconUrl: "/icons/stable.png", iconSize: [26, 26] }),
-  town: new L.Icon({ iconUrl: "/icons/town.png", iconSize: [34, 34] }),
+const sanitizeLatLngArray = (arr: unknown): LatLng[] => {
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(isLatLng);
 };
 
-/* ---------- Camera control ---------- */
-function CameraFocus({ target }: { target: LatLng | null }) {
+/* ---------- Small components ---------- */
+
+function MapRecenter({ center }: { center: LatLng | null }) {
   const map = useMap();
-
   useEffect(() => {
-    if (!target) return;
-    map.flyTo(target, 14, { duration: 1.8, easeLinearity: 0.25 });
-  }, [target, map]);
-
+    if (!center || !isLatLng(center)) return;
+    map.setView(center, 15);
+  }, [center, map]);
   return null;
 }
 
-/* ---------- Map click ---------- */
 function WaypointClick({ onSet }: { onSet: (p: LatLng) => void }) {
   useMapEvents({
     click(e) {
-      onSet([e.latlng.lat, e.latlng.lng]);
+      const lat = e?.latlng?.lat;
+      const lng = e?.latlng?.lng;
+      if (
+        typeof lat === "number" &&
+        typeof lng === "number" &&
+        !isNaN(lat) &&
+        !isNaN(lng)
+      ) {
+        onSet([lat, lng]);
+      }
     },
   });
   return null;
 }
 
 /* ================= MAIN ================= */
+
 export default function RDR2Map() {
   const [playerPos, setPlayerPos] = useState<LatLng | null>(null);
+  const [pois, setPois] = useState<POI[]>([]);
   const [waypoint, setWaypoint] = useState<LatLng | null>(null);
   const [route, setRoute] = useState<LatLng[]>([]);
   const [drawnRoute, setDrawnRoute] = useState<LatLng[]>([]);
-  const [distance, setDistance] = useState<number | null>(null);
+  const [recenterTarget, setRecenterTarget] = useState<LatLng | null>(null);
 
+  const fetchingPois = useRef(false);
   const animRef = useRef<number | null>(null);
-  const explored = useRef<LatLng[]>([]);
 
-  /* ---------- GPS ---------- */
-  useEffect(() => {
-    if (!navigator.geolocation) return;
+  /* ---------- Icons (smaller sizes) ---------- */
 
-    const id = navigator.geolocation.watchPosition(
-      (pos) => {
-        const p: LatLng = [pos.coords.latitude, pos.coords.longitude];
-        setPlayerPos(p);
-        explored.current.push(p);
-      },
-      () => { },
-      { enableHighAccuracy: true }
-    );
+  const icons = useMemo(() => {
+    if (typeof window === "undefined") return null;
 
-    return () => navigator.geolocation.clearWatch(id);
+    delete (L.Icon.Default.prototype as any)._getIconUrl;
+    L.Icon.Default.mergeOptions({
+      iconRetinaUrl:
+        "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+      iconUrl:
+        "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+      shadowUrl:
+        "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+    });
+
+    return {
+      player: new L.Icon({
+        iconUrl: "/icons/player.png",
+        iconSize: [28, 28],      // smaller than 36
+      }),
+      waypoint: new L.Icon({
+        iconUrl: "/icons/waypoint.png",
+        iconSize: [22, 22],      // smaller than 28
+        className: "rdr-waypoint",
+      }),
+      poi: {
+        hospital: new L.Icon({
+          iconUrl: "/icons/hospital.png",
+          iconSize: [20, 20],
+        }),
+        "gas-station": new L.Icon({
+          iconUrl: "/icons/gas-station.png",
+          iconSize: [20, 20],
+        }),
+        sheriff: new L.Icon({
+          iconUrl: "/icons/sheriff.png",
+          iconSize: [20, 20],
+        }),
+        bank: new L.Icon({
+          iconUrl: "/icons/bank.png",
+          iconSize: [20, 20],
+        }),
+        restaurant: new L.Icon({
+          iconUrl: "/icons/restaurant.png",
+          iconSize: [20, 20],
+        }),
+        shop: new L.Icon({
+          iconUrl: "/icons/shop.png",
+          iconSize: [20, 20],
+        }),
+        camp: new L.Icon({
+          iconUrl: "/icons/camp.png",
+          iconSize: [20, 20],
+        }),
+        hotel: new L.Icon({
+          iconUrl: "/icons/hotel.png",
+          iconSize: [20, 20],
+        }),
+        saloon: new L.Icon({
+          iconUrl: "/icons/saloon.png",
+          iconSize: [20, 20],
+        }),
+      } as Record<POIType, L.Icon>,
+    };
   }, []);
 
+  /* ---------- Geolocation (user location) ---------- */
+
+  const locateUser = () => {
+    if (typeof window === "undefined" || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos?.coords?.latitude;
+        const lng = pos?.coords?.longitude;
+        if (
+          typeof lat === "number" &&
+          typeof lng === "number" &&
+          !isNaN(lat) &&
+          !isNaN(lng)
+        ) {
+          const p: LatLng = [lat, lng];
+          setPlayerPos(p);
+          setRecenterTarget(p); // map jumps to user
+        }
+      },
+      console.error,
+      { enableHighAccuracy: true }
+    );
+  };
+
+  useEffect(() => {
+    locateUser();
+  }, []);
+
+  /* ---------- Fetch POIs near user ---------- */
+
+  useEffect(() => {
+    if (!playerPos || fetchingPois.current) return;
+    const [lat, lon] = playerPos;
+    if (
+      typeof lat !== "number" ||
+      typeof lon !== "number" ||
+      isNaN(lat) ||
+      isNaN(lon)
+    ) {
+      return;
+    }
+
+    fetchingPois.current = true;
+    const radius = 20000; // 20km around user; adjust if needed
+
+    const query = `
+      [out:json][timeout:25];
+      (
+        node(around:${radius},${lat},${lon})[amenity~"hospital|fuel|police|bank|restaurant"];
+        way(around:${radius},${lat},${lon})[amenity~"hospital|fuel|police|bank|restaurant"];
+        node(around:${radius},${lat},${lon})[shop];
+        way(around:${radius},${lat},${lon})[shop];
+      );
+      out center tags;
+    `;
+
+    fetch("https://overpass.kumi.systems/api/interpreter", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `data=${encodeURIComponent(query)}`,
+    })
+      .then((r) => r.json())
+      .then((data: any) => {
+        if (!data || !data.elements) {
+          fetchingPois.current = false;
+          return;
+        }
+
+        const parsed: POI[] = data.elements
+          .map((el: any): POI | null => {
+            const plat = el.lat ?? el.center?.lat;
+            const plon = el.lon ?? el.center?.lon;
+
+            if (
+              typeof plat !== "number" ||
+              typeof plon !== "number" ||
+              isNaN(plat) ||
+              isNaN(plon)
+            ) {
+              return null;
+            }
+
+            let type: POIType = "shop";
+            if (el.tags?.amenity === "hospital") type = "hospital";
+            else if (el.tags?.amenity === "fuel") type = "gas-station";
+            else if (el.tags?.amenity === "police") type = "sheriff";
+            else if (el.tags?.amenity === "bank") type = "bank";
+            else if (el.tags?.amenity === "restaurant") type = "restaurant";
+
+            return {
+              id: el.id,
+              type,
+              position: [plat, plon],
+              name: el.tags?.name,
+            };
+          })
+          .filter((item: POI | null): item is POI => item !== null)
+          .slice(0, 500); // show more POIs (up to 500)
+
+        if (parsed.length > 0) {
+          const avgLat =
+            parsed.reduce((sum, p) => sum + p.position[0], 0) / parsed.length;
+          const avgLon =
+            parsed.reduce((sum, p) => sum + p.position[1], 0) / parsed.length;
+          setRecenterTarget([avgLat, avgLon]);
+        }
+
+        setPois(parsed);
+        fetchingPois.current = false;
+      })
+      .catch(() => {
+        fetchingPois.current = false;
+      });
+  }, [playerPos]);
+
   /* ---------- Routing ---------- */
+
   useEffect(() => {
     if (!playerPos || !waypoint) return;
 
+    const [pLat, pLon] = playerPos;
+    const [wLat, wLon] = waypoint;
+
+    if (
+      [pLat, pLon, wLat, wLon].some(
+        (v) => typeof v !== "number" || isNaN(v as number)
+      )
+    ) {
+      return;
+    }
+
     fetch(
-      `https://router.project-osrm.org/route/v1/driving/${playerPos[1]},${playerPos[0]};${waypoint[1]},${waypoint[0]}?overview=full&geometries=geojson`
+      `https://router.project-osrm.org/route/v1/driving/${pLon},${pLat};${wLon},${wLat}?overview=full&geometries=geojson`
     )
       .then((r) => r.json())
-      .then((d) => {
-        if (!d?.routes?.[0]) return;
+      .then((d: any) => {
+        if (!d?.routes?.[0]?.geometry?.coordinates) return;
 
-        const coords: LatLng[] = d.routes[0].geometry.coordinates.map(
-          ([lng, lat]: number[]) => [lat, lng]
-        );
+        const rawCoords: [number, number][] = d.routes[0].geometry.coordinates;
+        const safeRoute: LatLng[] = rawCoords
+          .map((coord: [number, number]): LatLng | null => {
+            if (
+              !coord ||
+              coord.length !== 2 ||
+              typeof coord[0] !== "number" ||
+              typeof coord[1] !== "number" ||
+              isNaN(coord[0]) ||
+              isNaN(coord[1])
+            ) {
+              return null;
+            }
+            return [coord[1], coord[0]]; // [lat, lng]
+          })
+          .filter((c: LatLng | null): c is LatLng => c !== null);
 
-        setRoute(coords);
+        setRoute(safeRoute);
         setDrawnRoute([]);
-        setDistance(d.routes[0].distance / 1000);
-      });
+      })
+      .catch(console.error);
   }, [playerPos, waypoint]);
 
-  /* ---------- Route animation (paced) ---------- */
+  /* ---------- Route animation ---------- */
+
   useEffect(() => {
-    if (route.length < 2) return;
+    const cleanRoute = sanitizeLatLngArray(route);
+    if (cleanRoute.length < 2) {
+      setDrawnRoute([]);
+      return;
+    }
 
     let i = 0;
-    setDrawnRoute([route[0]]);
+    setDrawnRoute([cleanRoute[0]]);
 
     if (animRef.current) cancelAnimationFrame(animRef.current);
 
     const animate = () => {
-      i += 2; // pacing (slower & cinematic)
-      if (i >= route.length) return;
-
-      setDrawnRoute((prev) => [...prev, route[i]]);
+      i += 2;
+      if (i >= cleanRoute.length) return;
+      if (cleanRoute[i]) {
+        setDrawnRoute((prev) => [...prev, cleanRoute[i]]);
+      }
       animRef.current = requestAnimationFrame(animate);
     };
 
     animRef.current = requestAnimationFrame(animate);
-
     return () => {
       if (animRef.current) cancelAnimationFrame(animRef.current);
     };
   }, [route]);
 
-  /* ---------- POIs ---------- */
-/* ---------- POIs (spawn near user) ---------- */
-const pois: POI[] = useMemo(() => {
-  // 🚨 Do NOT generate POIs until location exists
-  if (!playerPos) return [];
+  /* ---------- Render ---------- */
 
-  const center: LatLng = playerPos;
-
-  const list: POI[] = [
-    {
-      type: "town",
-      position: center,
-      name: "Nearby Town",
-    },
-  ];
-
-  const types: POIType[] = ["shop", "camp", "doctor", "stable"];
-
-  for (let i = 0; i < 30; i++) {
-    const offsetLat = (Math.random() - 0.5) * 0.12;
-    const offsetLng = (Math.random() - 0.5) * 0.12;
-
-    list.push({
-      type: types[Math.floor(Math.random() * types.length)],
-      position: [
-        center[0] + offsetLat,
-        center[1] + offsetLng,
-      ],
-    });
+  if (!icons || typeof window === "undefined") {
+    return (
+      <div
+        style={{
+          height: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        Initializing map…
+      </div>
+    );
   }
 
-  return list;
-}, [playerPos]);
+  const safeCenter: LatLng =
+    playerPos && isLatLng(playerPos) ? playerPos : [23.458, 75.417];
 
+  const safeDrawnRoute = sanitizeLatLngArray(drawnRoute);
 
   return (
     <>
-      {distance && (
-        <div className="rdr-distance rdr-ui">
-          {distance.toFixed(1)} km
-        </div>
-      )}
-
-      <MapContainer
-        center={[23.458, 75.417]}
-        zoom={12}
-        zoomControl={false}
-        attributionControl={false}
-        preferCanvas
-        style={{ height: "100vh", width: "100vw" }}
+      <button
+        onClick={() => setRecenterTarget(playerPos ?? safeCenter)}
+        style={{
+          position: "absolute",
+          top: 20,
+          left: 20,
+          zIndex: 1100,
+          padding: "10px 20px",
+          background: "white",
+          border: "2px solid #333",
+          borderRadius: "5px",
+          cursor: "pointer",
+          color: "black",
+        }}
       >
-        <TileLayer url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png" />
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png"
-          opacity={0.55}
+        Recenter
+      </button>
+
+      <div style={{ position: "relative", height: "100vh", width: "100vw" }}>
+        <MapContainer
+          center={safeCenter}
+          zoom={13}
+          zoomControl={false}
+          attributionControl={false}
+          style={{ height: "100%", width: "100%" }}
+        >
+          <MapRecenter center={recenterTarget} />
+
+          <TileLayer url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png" />
+          <TileLayer
+            url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png"
+            opacity={0.55}
+          />
+
+          <WaypointClick onSet={setWaypoint} />
+
+          {playerPos && isLatLng(playerPos) && (
+            <Marker position={playerPos} icon={icons.player} />
+          )}
+
+          {pois
+            .filter((p) => isLatLng(p.position))
+            .map((p) => {
+              const icon = icons.poi[p.type] || icons.poi["shop"];
+              return (
+                <Marker
+                  key={p.id}
+                  position={p.position}
+                  icon={icon}
+                  eventHandlers={{ click: () => setWaypoint(p.position) }}
+                >
+                  {p.name && <Popup>{p.name}</Popup>}
+                </Marker>
+              );
+            })}
+
+          {waypoint && isLatLng(waypoint) && (
+            <Marker position={waypoint} icon={icons.waypoint} />
+          )}
+
+          {safeDrawnRoute.length > 1 && (
+            <Polyline
+              positions={safeDrawnRoute}
+              pathOptions={{
+                color: "#5b1a0a", // dark ink
+                weight: 4,
+                opacity: 0.9,
+                lineCap: "round",
+                lineJoin: "round",
+              }}
+            />
+          )}
+        </MapContainer>
+
+        {/* Parchment overlay (requires /textures/parchment.jpg) */}
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            pointerEvents: "none",
+            zIndex: 1000,
+            backgroundImage:
+              "url('/textures/parchment.jpg'), " +
+              "radial-gradient(circle at 30% 20%, rgba(255,255,240,0.18), transparent 55%)," +
+              "radial-gradient(circle at 80% 80%, rgba(222,184,135,0.2), transparent 55%)",
+            backgroundBlendMode: "multiply, normal, normal",
+            opacity: 0.7,
+            boxShadow: "inset 0 0 120px rgba(60, 25, 0, 0.55)",
+          }}
         />
-
-        <WaypointClick onSet={setWaypoint} />
-
-        {playerPos && (
-          <>
-            <Marker position={playerPos} icon={playerIcon} />
-            <CameraFocus target={playerPos} />
-          </>
-        )}
-
-        {pois.map((p, i) => (
-          <Marker
-            key={i}
-            position={p.position}
-            icon={poiIcons[p.type]}
-            eventHandlers={{ click: () => setWaypoint(p.position) }}
-          >
-            {p.name && (
-              <Popup>
-                <div className="rdr-town-label">
-                  <span>{p.name}</span>
-                </div>
-              </Popup>
-            )}
-          </Marker>
-        ))}
-
-        {waypoint && <Marker position={waypoint} icon={waypointIcon} />}
-
-        {drawnRoute.length > 1 && (
-          <Polyline
-            positions={drawnRoute}
-            pathOptions={{
-              color: "#8b0000",
-              weight: 3,
-              dashArray: "8 8",
-            }}
-          />
-        )}
-
-        {explored.current.map((p, i) => (
-          <Circle
-            key={i}
-            center={p}
-            radius={500}
-            pathOptions={{
-              color: "transparent",
-              fillOpacity: 0,
-            }}
-          />
-        ))}
-
-        <div className="rdr-parchment" />
-      </MapContainer>
+      </div>
     </>
   );
 }
