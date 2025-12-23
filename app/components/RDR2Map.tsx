@@ -111,6 +111,7 @@ export default function RDR2Map() {
   const [playerPos, setPlayerPos] = useState<LatLng | null>(null);
   const [geoState, setGeoState] = useState<GeoState>("idle");
   const [pois, setPois] = useState<POI[]>([]);
+  const [poisLoading, setPoisLoading] = useState(false);
   const [waypoint, setWaypoint] = useState<LatLng | null>(null);
   const [route, setRoute] = useState<LatLng[]>([]);
   const [drawnRoute, setDrawnRoute] = useState<LatLng[]>([]);
@@ -119,6 +120,7 @@ export default function RDR2Map() {
   const [initialCenter, setInitialCenter] = useState<LatLng | null>(null);
 
   const fetchingPois = useRef(false);
+  const lastPoiCenter = useRef<LatLng | null>(null);
   const animRef = useRef<number | null>(null);
 
   /* ---------- Icons (small) ---------- */
@@ -190,17 +192,14 @@ export default function RDR2Map() {
   /* ---------- Geolocation / initial center ---------- */
 
   useEffect(() => {
-    // 1) Try last location from previous sessions
     const last = loadLastLocation();
     if (last) {
       setInitialCenter(last);
       setRecenterTarget(last);
     } else {
-      // neutral center near Gulf of Guinea if absolutely nothing
       setInitialCenter([0, 0]);
     }
 
-    // 2) Try geolocation (will override if succeeds)
     if (typeof window === "undefined" || !navigator.geolocation) {
       setGeoState("unavailable");
       return;
@@ -233,14 +232,15 @@ export default function RDR2Map() {
         console.error("Geolocation error:", err);
         setGeoState(err.code === 1 ? "denied" : "unavailable");
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
     );
   }, []);
 
-  /* ---------- Fetch POIs around player (if known) ---------- */
+  /* ---------- Fetch POIs around player (optimized) ---------- */
 
   useEffect(() => {
-    if (!playerPos || fetchingPois.current) return;
+    if (!playerPos) return;
+
     const [lat, lon] = playerPos;
     if (
       typeof lat !== "number" ||
@@ -251,11 +251,25 @@ export default function RDR2Map() {
       return;
     }
 
+    // Avoid refetching if center hasn't changed significantly
+    const prev = lastPoiCenter.current;
+    if (
+      prev &&
+      Math.abs(prev[0] - lat) < 0.002 && // ~200m
+      Math.abs(prev[1] - lon) < 0.002
+    ) {
+      return;
+    }
+
+    if (fetchingPois.current) return;
     fetchingPois.current = true;
-    const radius = 20000;
+    lastPoiCenter.current = [lat, lon];
+    setPoisLoading(true);
+
+    const radius = 8000; // smaller radius than before for speed
 
     const query = `
-      [out:json][timeout:25];
+      [out:json][timeout:20];
       (
         node(around:${radius},${lat},${lon})[amenity~"hospital|fuel|police|bank|restaurant"];
         way(around:${radius},${lat},${lon})[amenity~"hospital|fuel|police|bank|restaurant"];
@@ -274,6 +288,7 @@ export default function RDR2Map() {
       .then((data: any) => {
         if (!data || !data.elements) {
           fetchingPois.current = false;
+          setPoisLoading(false);
           return;
         }
 
@@ -306,13 +321,15 @@ export default function RDR2Map() {
             };
           })
           .filter((item: POI | null): item is POI => item !== null)
-          .slice(0, 500);
+          .slice(0, 300); // fewer markers for less lag
 
         setPois(parsed);
         fetchingPois.current = false;
+        setPoisLoading(false);
       })
       .catch(() => {
         fetchingPois.current = false;
+        setPoisLoading(false);
       });
   }, [playerPos]);
 
@@ -436,23 +453,42 @@ export default function RDR2Map() {
         Recenter
       </button>
 
+      {poisLoading && (
+        <div
+          style={{
+            position: "absolute",
+            top: 20,
+            right: 20,
+            zIndex: 1100,
+            padding: "8px 14px",
+            background: "rgba(255, 248, 220, 0.95)",
+            borderRadius: 6,
+            border: "1px solid #5b1a0a",
+            fontSize: 12,
+            fontFamily: "serif",
+          }}
+        >
+          Searching nearby locations…
+        </div>
+      )}
+
       {geoState === "denied" && (
         <div
           style={{
             position: "absolute",
-            top: 70,
-            left: 20,
+            top: poisLoading ? 60 : 20,
+            right: 20,
             zIndex: 1100,
             padding: "6px 10px",
-            background: "rgba(255,255,255,0.9)",
+            background: "rgba(255,255,255,0.95)",
             borderRadius: 4,
             border: "1px solid #333",
             maxWidth: 260,
             fontSize: 12,
           }}
         >
-          Location blocked. Enable location for this site in browser settings
-          to see nearby POIs.
+          Location blocked. Enable location for this site in browser settings to
+          see nearby POIs.
         </div>
       )}
 
