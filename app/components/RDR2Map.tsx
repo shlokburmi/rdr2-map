@@ -50,12 +50,14 @@ const sanitizeLatLngArray = (arr: unknown): LatLng[] => {
 
 /* ---------- Small components ---------- */
 
-function MapRecenter({ center }: { center: LatLng | null }) {
+function MapRecenter({ target }: { target: LatLng | null }) {
   const map = useMap();
+
   useEffect(() => {
-    if (!center || !isLatLng(center)) return;
-    map.setView(center, 15);
-  }, [center, map]);
+    if (!target || !isLatLng(target)) return;
+    map.setView(target, 15);
+  }, [target, map]);
+
   return null;
 }
 
@@ -85,12 +87,15 @@ export default function RDR2Map() {
   const [waypoint, setWaypoint] = useState<LatLng | null>(null);
   const [route, setRoute] = useState<LatLng[]>([]);
   const [drawnRoute, setDrawnRoute] = useState<LatLng[]>([]);
+
+  // this drives the MapRecenter component
   const [recenterTarget, setRecenterTarget] = useState<LatLng | null>(null);
+  const [recenterKey, setRecenterKey] = useState(0);
 
   const fetchingPois = useRef(false);
   const animRef = useRef<number | null>(null);
 
-  /* ---------- Icons (smaller sizes) ---------- */
+  /* ---------- Icons (smaller) ---------- */
 
   const icons = useMemo(() => {
     if (typeof window === "undefined") return null;
@@ -108,11 +113,11 @@ export default function RDR2Map() {
     return {
       player: new L.Icon({
         iconUrl: "/icons/player.png",
-        iconSize: [28, 28],      // smaller than 36
+        iconSize: [28, 28],
       }),
       waypoint: new L.Icon({
         iconUrl: "/icons/waypoint.png",
-        iconSize: [22, 22],      // smaller than 28
+        iconSize: [22, 22],
         className: "rdr-waypoint",
       }),
       poi: {
@@ -156,7 +161,7 @@ export default function RDR2Map() {
     };
   }, []);
 
-  /* ---------- Geolocation (user location) ---------- */
+  /* ---------- Geolocation ---------- */
 
   const locateUser = () => {
     if (typeof window === "undefined" || !navigator.geolocation) return;
@@ -172,7 +177,8 @@ export default function RDR2Map() {
         ) {
           const p: LatLng = [lat, lng];
           setPlayerPos(p);
-          setRecenterTarget(p); // map jumps to user
+          setRecenterTarget(p);
+          setRecenterKey((k) => k + 1); // force MapRecenter re-run
         }
       },
       console.error,
@@ -184,7 +190,7 @@ export default function RDR2Map() {
     locateUser();
   }, []);
 
-  /* ---------- Fetch POIs near user ---------- */
+  /* ---------- Fetch POIs ---------- */
 
   useEffect(() => {
     if (!playerPos || fetchingPois.current) return;
@@ -199,7 +205,7 @@ export default function RDR2Map() {
     }
 
     fetchingPois.current = true;
-    const radius = 20000; // 20km around user; adjust if needed
+    const radius = 20000;
 
     const query = `
       [out:json][timeout:25];
@@ -253,15 +259,7 @@ export default function RDR2Map() {
             };
           })
           .filter((item: POI | null): item is POI => item !== null)
-          .slice(0, 500); // show more POIs (up to 500)
-
-        if (parsed.length > 0) {
-          const avgLat =
-            parsed.reduce((sum, p) => sum + p.position[0], 0) / parsed.length;
-          const avgLon =
-            parsed.reduce((sum, p) => sum + p.position[1], 0) / parsed.length;
-          setRecenterTarget([avgLat, avgLon]);
-        }
+          .slice(0, 500);
 
         setPois(parsed);
         fetchingPois.current = false;
@@ -307,7 +305,7 @@ export default function RDR2Map() {
             ) {
               return null;
             }
-            return [coord[1], coord[0]]; // [lat, lng]
+            return [coord[1], coord[0]];
           })
           .filter((c: LatLng | null): c is LatLng => c !== null);
 
@@ -371,7 +369,11 @@ export default function RDR2Map() {
   return (
     <>
       <button
-        onClick={() => setRecenterTarget(playerPos ?? safeCenter)}
+        onClick={() => {
+          const target = playerPos ?? safeCenter;
+          setRecenterTarget(target);
+          setRecenterKey((k) => k + 1); // force MapRecenter to run
+        }}
         style={{
           position: "absolute",
           top: 20,
@@ -396,7 +398,8 @@ export default function RDR2Map() {
           attributionControl={false}
           style={{ height: "100%", width: "100%" }}
         >
-          <MapRecenter center={recenterTarget} />
+          {/* key changes whenever button / geolocation updates */}
+          <MapRecenter key={recenterKey} target={recenterTarget} />
 
           <TileLayer url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png" />
           <TileLayer
@@ -434,7 +437,7 @@ export default function RDR2Map() {
             <Polyline
               positions={safeDrawnRoute}
               pathOptions={{
-                color: "#5b1a0a", // dark ink
+                color: "#5b1a0a",
                 weight: 4,
                 opacity: 0.9,
                 lineCap: "round",
@@ -444,7 +447,7 @@ export default function RDR2Map() {
           )}
         </MapContainer>
 
-        {/* Parchment overlay (requires /textures/parchment.jpg) */}
+        {/* Parchment overlay */}
         <div
           style={{
             position: "absolute",
