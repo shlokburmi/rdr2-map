@@ -36,6 +36,7 @@ interface POI {
 type GeoState = "idle" | "prompt" | "granted" | "denied" | "unavailable";
 
 const LAST_LOCATION_KEY = "rdr2map:lastLocation";
+const HELP_SEEN_KEY = "rdr2map:helpSeen";
 
 /* ---------- Helpers ---------- */
 
@@ -59,9 +60,7 @@ const loadLastLocation = (): LatLng | null => {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (isLatLng(parsed)) return parsed;
-  } catch {
-    /* ignore */
-  }
+  } catch {}
   return null;
 };
 
@@ -69,9 +68,23 @@ const saveLastLocation = (pos: LatLng) => {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(LAST_LOCATION_KEY, JSON.stringify(pos));
+  } catch {}
+};
+
+const loadHelpSeen = (): boolean => {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(HELP_SEEN_KEY) === "1";
   } catch {
-    /* ignore */
+    return false;
   }
+};
+
+const saveHelpSeen = () => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(HELP_SEEN_KEY, "1");
+  } catch {}
 };
 
 /* ---------- Small components ---------- */
@@ -111,7 +124,6 @@ export default function RDR2Map() {
   const [playerPos, setPlayerPos] = useState<LatLng | null>(null);
   const [geoState, setGeoState] = useState<GeoState>("idle");
   const [pois, setPois] = useState<POI[]>([]);
-  const [poisLoading, setPoisLoading] = useState(false);
   const [waypoint, setWaypoint] = useState<LatLng | null>(null);
   const [route, setRoute] = useState<LatLng[]>([]);
   const [drawnRoute, setDrawnRoute] = useState<LatLng[]>([]);
@@ -119,11 +131,31 @@ export default function RDR2Map() {
   const [recenterKey, setRecenterKey] = useState(0);
   const [initialCenter, setInitialCenter] = useState<LatLng | null>(null);
 
+  const [activeTypes, setActiveTypes] = useState<Set<POIType>>(
+    () =>
+      new Set<POIType>([
+        "hospital",
+        "gas-station",
+        "sheriff",
+        "bank",
+        "restaurant",
+        "shop",
+        "camp",
+        "hotel",
+        "saloon",
+      ])
+  );
+
+  const [showHelp, setShowHelp] = useState<boolean>(() => !loadHelpSeen());
+
+  const [routeDistance, setRouteDistance] = useState<number | null>(null);
+  const [routeDuration, setRouteDuration] = useState<number | null>(null);
+
   const fetchingPois = useRef(false);
   const lastPoiCenter = useRef<LatLng | null>(null);
   const animRef = useRef<number | null>(null);
 
-  /* ---------- Icons (small) ---------- */
+  /* ---------- Icons ---------- */
 
   const icons = useMemo(() => {
     if (typeof window === "undefined") return null;
@@ -236,7 +268,7 @@ export default function RDR2Map() {
     );
   }, []);
 
-  /* ---------- Fetch POIs around player (optimized) ---------- */
+  /* ---------- Fetch POIs when playerPos changes (20 km radius) ---------- */
 
   useEffect(() => {
     if (!playerPos) return;
@@ -251,12 +283,11 @@ export default function RDR2Map() {
       return;
     }
 
-    // Avoid refetching if center hasn't changed significantly
     const prev = lastPoiCenter.current;
     if (
       prev &&
-      Math.abs(prev[0] - lat) < 0.002 && // ~200m
-      Math.abs(prev[1] - lon) < 0.002
+      Math.abs(prev[0] - lat) < 0.01 && // ~1 km
+      Math.abs(prev[1] - lon) < 0.01
     ) {
       return;
     }
@@ -264,12 +295,11 @@ export default function RDR2Map() {
     if (fetchingPois.current) return;
     fetchingPois.current = true;
     lastPoiCenter.current = [lat, lon];
-    setPoisLoading(true);
 
-    const radius = 8000; // smaller radius than before for speed
+    const radius = 20000; // 20 km, more POIs
 
     const query = `
-      [out:json][timeout:20];
+      [out:json][timeout:25];
       (
         node(around:${radius},${lat},${lon})[amenity~"hospital|fuel|police|bank|restaurant"];
         way(around:${radius},${lat},${lon})[amenity~"hospital|fuel|police|bank|restaurant"];
@@ -288,7 +318,6 @@ export default function RDR2Map() {
       .then((data: any) => {
         if (!data || !data.elements) {
           fetchingPois.current = false;
-          setPoisLoading(false);
           return;
         }
 
@@ -321,15 +350,13 @@ export default function RDR2Map() {
             };
           })
           .filter((item: POI | null): item is POI => item !== null)
-          .slice(0, 300); // fewer markers for less lag
+          .slice(0, 500); // more markers
 
         setPois(parsed);
         fetchingPois.current = false;
-        setPoisLoading(false);
       })
       .catch(() => {
         fetchingPois.current = false;
-        setPoisLoading(false);
       });
   }, [playerPos]);
 
@@ -354,9 +381,10 @@ export default function RDR2Map() {
     )
       .then((r) => r.json())
       .then((d: any) => {
-        if (!d?.routes?.[0]?.geometry?.coordinates) return;
+        const routeObj = d?.routes?.[0];
+        if (!routeObj?.geometry?.coordinates) return;
 
-        const rawCoords: [number, number][] = d.routes[0].geometry.coordinates;
+        const rawCoords: [number, number][] = routeObj.geometry.coordinates;
         const safeRoute: LatLng[] = rawCoords
           .map((coord: [number, number]): LatLng | null => {
             if (
@@ -375,6 +403,12 @@ export default function RDR2Map() {
 
         setRoute(safeRoute);
         setDrawnRoute([]);
+        setRouteDistance(
+          typeof routeObj.distance === "number" ? routeObj.distance : null
+        );
+        setRouteDuration(
+          typeof routeObj.duration === "number" ? routeObj.duration : null
+        );
       })
       .catch(console.error);
   }, [playerPos, waypoint]);
@@ -408,6 +442,32 @@ export default function RDR2Map() {
     };
   }, [route]);
 
+  /* ---------- HUD helpers ---------- */
+
+  const formatDistance = (m: number | null): string => {
+    if (!m || m <= 0) return "";
+    if (m < 1000) return `${m.toFixed(0)} m`;
+    return `${(m / 1000).toFixed(1)} km`;
+  };
+
+  const formatDuration = (s: number | null): string => {
+    if (!s || s <= 0) return "";
+    const minutes = Math.round(s / 60);
+    if (minutes < 60) return `${minutes} min`;
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (m === 0) return `${h} h`;
+    return `${h} h ${m} min`;
+  };
+
+  const clearRoute = () => {
+    setWaypoint(null);
+    setRoute([]);
+    setDrawnRoute([]);
+    setRouteDistance(null);
+    setRouteDuration(null);
+  };
+
   /* ---------- Render ---------- */
 
   if (!icons || typeof window === "undefined" || !initialCenter) {
@@ -428,47 +488,185 @@ export default function RDR2Map() {
   const safeCenter: LatLng = initialCenter;
   const safeDrawnRoute = sanitizeLatLngArray(drawnRoute);
 
+  const toggleType = (t: POIType) => {
+    setActiveTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t);
+      else next.add(t);
+      return next;
+    });
+  };
+
+  const hudDistance = formatDistance(routeDistance);
+  const hudDuration = formatDuration(routeDuration);
+  const showHUD = hudDistance || hudDuration;
+
   return (
     <>
-      <button
-        onClick={() => {
-          const target =
-            playerPos ?? loadLastLocation() ?? safeCenter;
-          setRecenterTarget(target);
-          setRecenterKey((k) => k + 1);
-        }}
+      {/* Left controls */}
+      <div
         style={{
           position: "absolute",
           top: 20,
           left: 20,
           zIndex: 1100,
-          padding: "10px 20px",
-          background: "white",
-          border: "2px solid #333",
-          borderRadius: "5px",
-          cursor: "pointer",
-          color: "black",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
         }}
       >
-        Recenter
-      </button>
+        <button
+          onClick={() => {
+            const target =
+              playerPos ?? loadLastLocation() ?? safeCenter;
+            setRecenterTarget(target);
+            setRecenterKey((k) => k + 1);
+          }}
+          style={{
+            padding: "10px 20px",
+            background: "white",
+            border: "2px solid #333",
+            borderRadius: "5px",
+            cursor: "pointer",
+            color: "black",
+          }}
+        >
+          Recenter
+        </button>
 
-      {poisLoading && (
+        <button
+          onClick={clearRoute}
+          style={{
+            padding: "8px 16px",
+            background: "white",
+            border: "2px solid #333",
+            borderRadius: "5px",
+            cursor: "pointer",
+            color: "black",
+          }}
+        >
+          Clear Route
+        </button>
+      </div>
+
+      {/* Help + filters bar */}
+      <div
+        style={{
+          position: "absolute",
+          top: 20,
+          right: 20,
+          zIndex: 1100,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-end",
+          gap: 10,
+        }}
+      >
+        <button
+          onClick={() => {
+            const next = !showHelp;
+            setShowHelp(next);
+            if (!next) saveHelpSeen();
+          }}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            border: "2px solid #333",
+            background: "white",
+            cursor: "pointer",
+            fontWeight: 700,
+          }}
+        >
+          ?
+        </button>
+
+        {showHelp && (
+          <div
+            style={{
+              marginTop: 4,
+              padding: "8px 12px",
+              maxWidth: 260,
+              background: "rgba(255, 248, 220, 0.96)",
+              borderRadius: 6,
+              border: "1px solid #5b1a0a",
+              fontSize: 12,
+              fontFamily: "serif",
+            }}
+          >
+            Tap the map or a location icon to set a waypoint. The line shows the
+            fastest road route. Use Recenter to jump back to your position.
+          </div>
+        )}
+
+        <div
+          style={{
+            marginTop: 8,
+            padding: "6px 8px",
+            background: "rgba(255, 255, 255, 0.95)",
+            borderRadius: 6,
+            border: "1px solid #333",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 6,
+            maxWidth: 320,
+          }}
+        >
+          {(
+            [
+              ["hospital", "HOSP"],
+              ["gas-station", "FUEL"],
+              ["sheriff", "POLICE"],
+              ["bank", "BANK"],
+              ["restaurant", "FOOD"],
+              ["shop", "SHOP"],
+              ["hotel", "HOTEL"],
+              ["camp", "CAMP"],
+              ["saloon", "BAR"],
+            ] as [POIType, string][]
+          ).map(([type, label]) => {
+            const active = activeTypes.has(type);
+            return (
+              <button
+                key={type}
+                onClick={() => toggleType(type)}
+                style={{
+                  padding: "4px 8px",
+                  fontSize: 11,
+                  borderRadius: 4,
+                  border: "1px solid #333",
+                  cursor: "pointer",
+                  background: active ? "#5b1a0a" : "white",
+                  color: active ? "white" : "black",
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* HUD */}
+      {showHUD && (
         <div
           style={{
             position: "absolute",
-            top: 20,
-            right: 20,
+            bottom: 20,
+            left: "50%",
+            transform: "translateX(-50%)",
             zIndex: 1100,
             padding: "8px 14px",
-            background: "rgba(255, 248, 220, 0.95)",
-            borderRadius: 6,
+            background: "rgba(255, 248, 220, 0.96)",
+            borderRadius: 8,
             border: "1px solid #5b1a0a",
-            fontSize: 12,
+            fontSize: 13,
             fontFamily: "serif",
           }}
         >
-          Searching nearby locations…
+          {hudDistance && <span>{hudDistance}</span>}
+          {hudDistance && hudDuration && <span> · </span>}
+          {hudDuration && <span>{hudDuration}</span>}
         </div>
       )}
 
@@ -476,8 +674,8 @@ export default function RDR2Map() {
         <div
           style={{
             position: "absolute",
-            top: poisLoading ? 60 : 20,
-            right: 20,
+            bottom: showHUD ? 60 : 20,
+            left: 20,
             zIndex: 1100,
             padding: "6px 10px",
             background: "rgba(255,255,255,0.95)",
@@ -492,6 +690,7 @@ export default function RDR2Map() {
         </div>
       )}
 
+      {/* Map */}
       <div style={{ position: "relative", height: "100vh", width: "100vw" }}>
         <MapContainer
           center={safeCenter}
@@ -515,6 +714,7 @@ export default function RDR2Map() {
           )}
 
           {pois
+            .filter((p) => activeTypes.has(p.type))
             .filter((p) => isLatLng(p.position))
             .map((p) => {
               const icon = icons.poi[p.type] || icons.poi["shop"];
@@ -530,7 +730,20 @@ export default function RDR2Map() {
                     },
                   }}
                 >
-                  {p.name && <Popup>{p.name}</Popup>}
+                  {p.name && (
+                    <Popup>
+                      <div style={{ fontFamily: "serif", fontSize: 13 }}>
+                        <div style={{ fontWeight: 600 }}>{p.name}</div>
+                        <div style={{ marginTop: 4 }}>
+                          Type: {p.type.toUpperCase()}
+                        </div>
+                        <div style={{ fontSize: 11, opacity: 0.7 }}>
+                          {p.position[0].toFixed(5)},{" "}
+                          {p.position[1].toFixed(5)}
+                        </div>
+                      </div>
+                    </Popup>
+                  )}
                 </Marker>
               );
             })}
