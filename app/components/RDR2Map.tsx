@@ -268,7 +268,7 @@ export default function RDR2Map() {
     );
   }, []);
 
-  /* ---------- Fetch POIs when playerPos changes (20 km radius) ---------- */
+  /* ---------- Fetch POIs when playerPos changes ---------- */
 
   useEffect(() => {
     if (!playerPos) return;
@@ -286,7 +286,7 @@ export default function RDR2Map() {
     const prev = lastPoiCenter.current;
     if (
       prev &&
-      Math.abs(prev[0] - lat) < 0.01 && // ~1 km
+      Math.abs(prev[0] - lat) < 0.01 &&
       Math.abs(prev[1] - lon) < 0.01
     ) {
       return;
@@ -296,7 +296,7 @@ export default function RDR2Map() {
     fetchingPois.current = true;
     lastPoiCenter.current = [lat, lon];
 
-    const radius = 20000; // 20 km, more POIs
+    const radius = 20000;
 
     const query = `
       [out:json][timeout:25];
@@ -350,7 +350,7 @@ export default function RDR2Map() {
             };
           })
           .filter((item: POI | null): item is POI => item !== null)
-          .slice(0, 500); // more markers
+          .slice(0, 500);
 
         setPois(parsed);
         fetchingPois.current = false;
@@ -766,7 +766,7 @@ export default function RDR2Map() {
           )}
         </MapContainer>
 
-        {/* Parchment overlay */}
+        {/* Parchment overlay (does not block clicks because pointerEvents: none) */}
         <div
           style={{
             position: "absolute",
